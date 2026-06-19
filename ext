@@ -1,0 +1,160 @@
+# =======================================================
+# FILENAME: main.py (UPDATED WITH CUSTOM RECOVERY)
+# =======================================================
+import sys, os, shutil, json, webbrowser
+from datetime import datetime
+
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QCheckBox,
+    QFileDialog, QLabel, QTextEdit, QDialog, QLineEdit, QFormLayout,
+    QMessageBox, QHBoxLayout, QFrame, QListWidget
+)
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QFont, QIntValidator
+
+# --- Core Modules ---
+from modules import metadata_extraction, reporting
+from modules.custom_recovery import recover_files_custom   # ✅ NEW
+
+try: from modules import hash_verification
+except: hash_verification = None
+try: from modules import tamper_detection
+except: tamper_detection = None
+try: from modules import social_fingerprint
+except: social_fingerprint = None
+
+# ================= STYLE =================
+STYLE = """ """  # same as before
+
+# ================= CASE LOGIN =================
+class CaseSelectionDialog(QDialog):
+    def __init__(self, current_base="Cases"):
+        super().__init__()
+        self.setStyleSheet(STYLE)
+        self.case_dir = None
+        self.base_dir = os.path.abspath(current_base)
+        os.makedirs(self.base_dir, exist_ok=True)
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QHBoxLayout(self)
+        self.case_list = QListWidget()
+        self.refresh_cases()
+
+        open_btn = QPushButton("OPEN CASE")
+        open_btn.clicked.connect(self.open_existing)
+
+        create_btn = QPushButton("CREATE CASE")
+        create_btn.clicked.connect(self.create_new)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.case_list)
+        layout.addWidget(open_btn)
+        layout.addWidget(create_btn)
+
+        main_layout.addLayout(layout)
+
+    def refresh_cases(self):
+        self.case_list.clear()
+        if os.path.exists(self.base_dir):
+            self.case_list.addItems(os.listdir(self.base_dir))
+
+    def open_existing(self):
+        item = self.case_list.currentItem()
+        if item:
+            self.case_dir = os.path.join(self.base_dir, item.text())
+            self.accept()
+
+    def create_new(self):
+        name = f"CASE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        path = os.path.join(self.base_dir, name)
+        os.makedirs(os.path.join(path, "Inputs"), exist_ok=True)
+        os.makedirs(os.path.join(path, "Reports"), exist_ok=True)
+        self.case_dir = path
+        self.accept()
+
+# ================= MAIN APP =================
+class UDFAApp(QMainWindow):
+    def __init__(self, case_dir):
+        super().__init__()
+        self.case_dir = case_dir
+        self.input_path = None
+        self.setWindowTitle("FORENSIC LENS")
+        self.resize(1200, 800)
+        self.init_ui()
+
+    def init_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+
+        # Sidebar
+        side_layout = QVBoxLayout()
+
+        btn_import = QPushButton("📥 IMPORT EVIDENCE")
+        btn_import.clicked.connect(self._browse)
+        side_layout.addWidget(btn_import)
+
+        # ✅ NEW RECOVERY BUTTON
+        btn_recover = QPushButton("🧠 CUSTOM RECOVERY")
+        btn_recover.clicked.connect(self._recover_data)
+        side_layout.addWidget(btn_recover)
+
+        btn_run = QPushButton("🚀 START INVESTIGATION")
+        btn_run.clicked.connect(self._run)
+        side_layout.addWidget(btn_run)
+
+        main_layout.addLayout(side_layout)
+
+        # Log
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        main_layout.addWidget(self.log)
+
+    def _log(self, msg):
+        self.log.append(msg)
+
+    def _browse(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select File")
+        if f:
+            dest = os.path.join(self.case_dir, "Inputs", os.path.basename(f))
+            shutil.copy2(f, dest)
+            self.input_path = dest
+            self._log(f"Loaded: {f}")
+
+    # ================= CUSTOM RECOVERY =================
+    def _recover_data(self):
+        device = "/dev/sdb1"   # ⚠️ check with lsblk
+
+        self._log("Starting CUSTOM recovery...")
+
+        try:
+            recover_files_custom(device)
+            self._log("Recovery completed!")
+
+        except Exception as e:
+            self._log(f"Recovery Error: {e}")
+
+    # ================= ANALYSIS =================
+    def _run(self):
+        if not self.input_path:
+            self._log("No file selected")
+            return
+
+        meta = metadata_extraction.extract_metadata(self.input_path)
+        self._log("Metadata extracted")
+
+        report_path = reporting.generate_report(self.input_path, [], meta, {}, {}, {})
+        if report_path:
+            webbrowser.open(report_path)
+            self._log("Report opened")
+
+# ================= RUN =================
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    dlg = CaseSelectionDialog()
+
+    if dlg.exec_() == QDialog.Accepted:
+        win = UDFAApp(dlg.case_dir)
+        win.show()
+        sys.exit(app.exec_())

@@ -1,0 +1,83 @@
+# modules/tamper_detection.py
+from PIL import Image, ImageChops, ImageOps, ImageEnhance
+from io import BytesIO
+import os
+import numpy as np
+
+# ------------------------------------------------------------
+# ADVANCED FORENSIC HEATMAP
+# ------------------------------------------------------------
+def perform_ela(image_path, quality=90):
+    try:
+        # 1. Original Load
+        original = Image.open(image_path).convert("RGB")
+
+        # 2. Recompression artifact analysis
+        buffer = BytesIO()
+        original.save(buffer, "JPEG", quality=quality)
+        buffer.seek(0)
+        recompressed = Image.open(buffer)
+
+        # 3. Difference Calculation (Raw)
+        diff = ImageChops.difference(original, recompressed)
+        diff_array = np.array(diff)
+        
+        # Core Stats for Decision Making
+        m, mx, sd = float(np.mean(diff_array)), int(np.max(diff_array)), float(np.std(diff_array))
+
+        # 4. Advance Heatmap Visualization
+        # Equalize ki jagah hum Contrast enhancement use karenge taaki false positives kam hon
+        enhancer = ImageEnhance.Contrast(diff)
+        enhanced_diff = enhancer.enhance(15.0) # Sharp focus on anomalies
+        
+        ela_gray = enhanced_diff.convert("L")
+        # Color Map: Blue (Low/Normal), Yellow (Suspicious), Red (High Manipulation)
+        heatmap = ImageOps.colorize(ela_gray, black="#00051a", white="#ff0000", mid="#ffff00")
+
+        # 5. Secure Path Management
+        case_root = os.path.dirname(os.path.dirname(os.path.abspath(image_path)))
+        report_dir = os.path.join(case_root, "Reports")
+        os.makedirs(report_dir, exist_ok=True)
+        
+        ela_filename = os.path.basename(image_path).split('.')[0] + "_HEATMAP.jpg"
+        ela_path = os.path.join(report_dir, ela_filename)
+        heatmap.save(ela_path, "JPEG")
+
+        return {"ela_path": ela_path, "mean_error": m, "max_error": mx, "std_dev": sd}
+    except Exception as e: return {"error": str(e)}
+
+# ------------------------------------------------------------
+# FORENSIC DECISION ENGINE (CALIBRATED)
+# ------------------------------------------------------------
+def quick_tamper_check(image_path):
+    res = perform_ela(image_path)
+    if "error" in res: return {"tamper_likelihood": 0, "decision": "System Error", "details": res}
+
+    m, mx, sd = res["mean_error"], res["max_error"], res["std_dev"]
+    score = 0
+    
+    # Forensic Calibrations: AI Edits often leave micro-noise spikes
+    if m > 3.5: score += 40      # Mean noise floor
+    if mx > 120: score += 30     # Pixel peak anomaly
+    if sd > 7.0: score += 30      # Texture inconsistency
+    
+    score = min(score, 100)
+
+    # Smart Decisions
+    if score >= 70: 
+        dec = "CRITICAL: MANIPULATION DETECTED"
+    elif score >= 35: 
+        dec = "WARNING: AI ARTIFACTS / EDITING TRACES"
+    else: 
+        dec = "CLEAN: Likely Authentic"
+
+    return {
+        "tamper_likelihood": score,
+        "decision": dec,
+        "details": {
+            "Noise_Mean": round(m, 2),
+            "Peak_Error": mx,
+            "Dev_Index": round(sd, 2),
+            "Heatmap_Path": res["ela_path"]
+        }
+    }
