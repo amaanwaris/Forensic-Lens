@@ -546,7 +546,7 @@ Bug reports, feature requests, and contributions are welcome.
 
 ## Amaan Waris
 
-**B.Tech — Computer Science & Information Technology**
+**B.Tech — Computer Science**
 
 ### Areas of Interest
 
